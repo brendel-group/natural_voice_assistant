@@ -1,0 +1,6 @@
+SpeechRecognition
+llama-cpp-python
+TTS
+openai-whisper
+sounddevice
+pyaudio
