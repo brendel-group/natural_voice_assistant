@@ -35,9 +35,9 @@ To start the Voice2Voice Assistant, use the following command in the console. Yo
 ```bash
 python voice2voice.py -m <path_to_llm> -w <whisper_model> -t <tts_model> -d <device> -v <path_to_voice_sample>
 ```
-Parameters:
--m, --llm: Path to the local Large Language Model.
--w, --whisper: (Optional) Specify the Whisper model to use for ASR.
--t, --tts: (Optional) Specify the TTS model.
--d, --device: (Optional) Specify the device to use (e.g., 'cpu', 'gpu').
--v, --voice: Path to the voice sample for voice cloning.
+Parameters:<br>
+-m, --llm: Path to the local Large Language Model.<br>
+-w, --whisper: (Optional) Specify the Whisper model to use for ASR.<br>
+-t, --tts: (Optional) Specify the TTS model.<br>
+-d, --device: (Optional) Specify the device to use (e.g., 'cpu', 'gpu').<br>
+-v, --voice: Path to the voice sample for voice cloning.<br>
