@@ -33,11 +33,13 @@ Before running the program, you need to provide a path to a local LLM and a voic
 To start the Voice2Voice Assistant, use the following command in the console. You must at least provide the path to a local LLM and a voice example:
 
 ```bash
-python voice2voice.py -m <path_to_llm> -w <whisper_model> -t <tts_model> -d <device> -v <path_to_voice_sample>
+python main.py -m <path_to_llm> -w <whisper_model> -t <tts_model> -d <device> -v <path_to_voice_sample>
 ```
-Parameters:
--m, --llm: Path to the local Large Language Model.
--w, --whisper: (Optional) Specify the Whisper model to use for ASR.
--t, --tts: (Optional) Specify the TTS model.
--d, --device: (Optional) Specify the device to use (e.g., 'cpu', 'gpu').
--v, --voice: Path to the voice sample for voice cloning.
+**Parameters:**
+<ul>
+<li>-m, --llm: Path to the local Large Language Model.</li>
+<li>-w, --whisper: (Optional) Specify the Whisper model to use for ASR.</li>
+<li>-t, --tts: (Optional) Specify the TTS model.</li>
+<li>-d, --device: (Optional) Specify the device to use (e.g., 'cpu', 'gpu').</li>
+<li>-v, --voice: Path to the voice sample for voice cloning.</li>
+</ul>
