@@ -24,7 +24,7 @@ class Voice2Voice():
     CHANNELS = 1
     RATE = 24000
 
-    def __init__(self, whisper_model, llm, tts, wake_word=None):
+    def __init__(self, whisper_model, llm, tts,voice_file,  wake_word=None):
         # Initialization of the Voice2Voice class
         self.recognizer = sr.Recognizer()  # Speech recognition instance
         self.recognizer.pause_threshold = 0.5  # Configuration for pause threshold
@@ -33,7 +33,7 @@ class Voice2Voice():
         self.tts = tts  # Text-to-Speech (TTS) instance
         self.tts_model = self.tts.synthesizer.tts_model  # TTS model
         # Getting conditioning latents for TTS
-        self.gpt_cond_latent, self.speaker_embedding = self.tts_model.get_conditioning_latents(audio_path=[SPEAKER_WAV])
+        self.gpt_cond_latent, self.speaker_embedding = self.tts_model.get_conditioning_latents(audio_path=[voice_file])
         self.audio = pyaudio.PyAudio()  # PyAudio instance for audio I/O
         self.audio_buffer = queue.Queue()  # Queue for audio buffer
         self.text_buffer = queue.Queue()  # Queue for text buffer
@@ -156,14 +156,17 @@ def main():
     parser.add_argument("-w", "--whisper", type=str, default=WHISPER_MODEL)
     parser.add_argument("-t", "--tts", type=str, default=TTS_MODEL)
     parser.add_argument("-d", "--device", type=str, default=DEVICE)
+    parser.add_argument("-v", "--voice", type=str, default=SPEAKER_WAV)
     args = parser.parse_args()
 
     # Initialize models
     whisper_model = whisper.load_model(args.whisper)
     llm = Llama(model_path=args.llm)
-    tts = TTS(args.tts, gpu=args.device=="gpu")
-    model = Voice2Voice(whisper_model, llm, tts)
+    tts = TTS(args.tts, gpu=args.device=="cuda")
+    model = Voice2Voice(whisper_model, llm, tts, args.voice)
+    print("\n\n Using Cuda? ", args.device=="cuda")
     model.run()
+
 
 if __name__ == "__main__":
     main()
