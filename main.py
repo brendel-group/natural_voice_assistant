@@ -1,18 +1,18 @@
 import speech_recognition as sr        # Importing the speech recognition library
-from TTS.api import TTS               # Importing the Text-to-Speech API                      
+from llama_cpp import Llama           # Importing the Llama library for large language model processing
+from TTS.api import TTS               # Importing the Text-to-Speech API
+import whisper                         # Importing the Whisper library for speech recognition
 import sounddevice as sd              # Importing the library for sound device manipulation
 import time                            # Importing the time library for handling time-related tasks
 import threading                       # Importing the threading library for concurrent execution
 import queue                           # Importing the queue library for queue data structure
 import pyaudio                         # Importing the PyAudio library for audio I/O
 import argparse                        # Importing the argparse library for command-line argument parsing
-import torch
-from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline, AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
 
 # Constants for configuration
-WHISPER_MODEL = "distil-whisper/distil-medium.en"
+WHISPER_MODEL = "base"
 LANGUAGE = "de"
-LLM_MODEL = "'stabilityai/stablelm-zephyr-3b'" 
+LLM_PATH = "stablelm-zephyr-3b.Q4_K_M.gguf" 
 SPEAKER_WAV = "voice.wav"
 TTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
 DEVICE = "cpu"
@@ -24,14 +24,12 @@ class Voice2Voice():
     CHANNELS = 1
     RATE = 24000
 
-    def __init__(self, whisper_model, llm_tokenizer, llm_model, llm_streamer, tts,voice_file,  wake_word=None):
+    def __init__(self, whisper_model, llm, tts,voice_file,  wake_word=None):
         # Initialization of the Voice2Voice class
         self.recognizer = sr.Recognizer()  # Speech recognition instance
         self.recognizer.pause_threshold = 0.5  # Configuration for pause threshold
         self.whisper_model = whisper_model  # Whisper model for speech recognition
-        self.llm_tokenizer = llm_tokenizer
-        self.llm_model = llm_model
-        self.llm_streamer = llm_streamer
+        self.llm = llm  # Large language model (LLM) instance
         self.tts = tts  # Text-to-Speech (TTS) instance
         self.tts_model = self.tts.synthesizer.tts_model  # TTS model
         # Getting conditioning latents for TTS
@@ -56,7 +54,7 @@ class Voice2Voice():
         print("\nASR: Transcribing ...")
         stop = False
         start = time.time()
-        transcription = text = whisper_model("audio.wav")
+        transcription = whisper_model.transcribe("audio.wav", language=LANGUAGE, fp16=False)
         if len(transcription["segments"])>0 and transcription["segments"][0]['no_speech_prob'] < 0.2:
             text = transcription["text"]
             if STOP_PHRASE in text.lower():
@@ -104,24 +102,27 @@ class Voice2Voice():
         # Process text with the large language model
         print("\nLLM: inference ...")
         start = time.time()
-        inputs = self.llm_streamer([prompt], return_tensors="pt").to(self.llm_model.device)
-        generation_kwargs = dict(inputs, streamer=self.llm_streamer, max_new_tokens=256)
-        thread = threading.Thread(target=self.llm_model.generate, kwargs=generation_kwargs)
-        thread.start()
+        stream = self.llm(
+            prompt,
+            max_tokens=10000,  
+            stream=True,
+        )
         output_buffer = ""
-        for text_output in self.llm_streamer:
-            output_buffer += text_output
-            if any([t in output_buffer for t in [".","!","?"]]):
-                if len(output_buffer) < 3:
+        for output in stream:
+            if "choices" in output and output["choices"]:
+                text_output = output["choices"][0]["text"]
+                output_buffer += text_output
+
+                if any([t in output_buffer for t in [".","!","?"]]):
+                    if len(output_buffer) < 3:
+                        output_buffer = ""
+                        continue
+                    output_buffer = output_buffer.replace('assistant', '').strip() 
+                    print("LLM: <T> ", time.time()-start)
+                    print("LLM: -->  ", output_buffer)
+                    start = time.time()
+                    self.text_buffer.put(output_buffer)
                     output_buffer = ""
-                    continue
-                output_buffer = output_buffer.strip() 
-                print("LLM: <T> ", time.time()-start)
-                print("LLM: -->  ", output_buffer)
-                start = time.time()
-                self.text_buffer.put(output_buffer)
-                output_buffer = ""
-        thread.join()
 
     def handle_voice_input(self):
         # Handle voice input from the user
@@ -148,31 +149,10 @@ class Voice2Voice():
                     if stop:
                         break
 
-
-def load_distil_whisper_pipe(model_id, device):
-    torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    model = AutoModelForSpeechSeq2Seq.from_pretrained(
-        model_id, torch_dtype=torch_dtype, low_cpu_mem_usage=True, use_safetensors=True
-    )
-    model.to(device)
-    processor = AutoProcessor.from_pretrained(model_id)
-    pipe = pipeline(
-        "automatic-speech-recognition",
-        model=model,
-        chunk_length_s=30,
-        tokenizer=processor.tokenizer,
-        feature_extractor=processor.feature_extractor,
-        max_new_tokens=1024,
-        torch_dtype=torch_dtype,
-        device=device,
-    )
-
-    return pipe
-
 def main():
     # Main function to set up and run the voice assistant
     parser = argparse.ArgumentParser()
-    parser.add_argument("-m", "--llm", type=str, default=LLM_MODEL)
+    parser.add_argument("-m", "--llm", type=str, default=LLM_PATH)
     parser.add_argument("-w", "--whisper", type=str, default=WHISPER_MODEL)
     parser.add_argument("-t", "--tts", type=str, default=TTS_MODEL)
     parser.add_argument("-d", "--device", type=str, default=DEVICE)
@@ -180,16 +160,11 @@ def main():
     args = parser.parse_args()
 
     # Initialize models
-    whisper_model = load_distil_whisper_pipe(args.whisper, args.device)
-    llm_tokenizer = AutoTokenizer.from_pretrained(args.llm)
-    llm_model = AutoModelForCausalLM.from_pretrained(
-        args.llm,
-        trust_remote_code=True,
-        device_map="auto"
-    )
-    llm_streamer = TextIteratorStreamer(llm_tokenizer, skip_prompt = True)
+    whisper_model = whisper.load_model(args.whisper)
+    llm = Llama(model_path=args.llm, n_gpu_layers=30)
     tts = TTS(args.tts, gpu=args.device=="cuda")
-    model = Voice2Voice(whisper_model, llm_tokenizer, llm_model, llm_streamer, tts, args.voice)
+    model = Voice2Voice(whisper_model, llm, tts, args.voice)
+    print("\n\n Using Cuda? ", args.device=="cuda")
     model.run()
 
 
