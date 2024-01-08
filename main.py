@@ -11,12 +11,12 @@ import argparse                        # Importing the argparse library for comm
 
 # Constants for configuration
 WHISPER_MODEL = "base"
-LANGUAGE = "de"
+LANGUAGE = "en"
 LLM_PATH = "stablelm-zephyr-3b.Q4_K_M.gguf" 
 SPEAKER_WAV = "voice.wav"
 TTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
-DEVICE = "cpu"
-STOP_PHRASE = "Stoppe die Aufnahme"
+DEVICE = "cuda"
+STOP_PHRASE = "Stop recording"
 
 class Voice2Voice():
     # Audio format settings for PyAudio
