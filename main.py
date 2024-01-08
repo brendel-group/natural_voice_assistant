@@ -78,7 +78,7 @@ class Voice2Voice():
         while True:
             text = self.text_buffer.get()
             if text is None:
-                break
+                continue
             print("\n TTS: synthesizing... ")
             start = time.time()
             stream_generator = self.tts_model.inference_stream(
