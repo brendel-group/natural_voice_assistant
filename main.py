@@ -12,8 +12,8 @@ import argparse                        # Importing the argparse library for comm
 # Constants for configuration
 WHISPER_MODEL = "base"
 LANGUAGE = "en"
-LLM_PATH = "stablelm-zephyr-3b.Q4_K_M.gguf" 
-SPEAKER_WAV = "voice.wav"
+LLM_PATH = "stablelm-zephyr-3b.Q4_K_M.gguf"
+SPEAKER_WAV = "voice_male.wav"
 TTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
 DEVICE = "cuda"
 STOP_PHRASE = "Stop recording"
@@ -37,17 +37,25 @@ class Voice2Voice():
         self.audio = pyaudio.PyAudio()  # PyAudio instance for audio I/O
         self.audio_buffer = queue.Queue()  # Queue for audio buffer
         self.text_buffer = queue.Queue()  # Queue for text buffer
+        self.prompt_buffer = queue.Queue() # Queue for user transcribed user input
         self.wake_word = wake_word  # Optional wake word for activation
+        self.start_conversation = time.time()
+
+        self.stop_current_inference = False
 
     def start_threads(self):
         # Start threads for text processing and audio playback
-        text_thread = threading.Thread(target=self.tts_thread)
-        text_thread.setDaemon(True)
-        text_thread.start()
+        tts_thread = threading.Thread(target=self.tts_thread)
+        tts_thread.setDaemon(True)
+        tts_thread.start()
 
         audio_thread = threading.Thread(target=self.play_audio_thread)
         audio_thread.setDaemon(True)
         audio_thread.start()
+        
+        llm_thread = threading.Thread(target=self.llm_thread)
+        llm_thread.setDaemon(True)
+        llm_thread.start()
 
     def transcribe_audio(self,whisper_model):
         # Transcribe audio using the Whisper model
@@ -65,6 +73,29 @@ class Voice2Voice():
         print("ASR --> ", text)
         return text, stop
 
+    def synthesize_speech(self, text):
+        print("\n TTS: synthesizing... ")
+        start = time.time()
+        stream_generator = self.tts_model.inference_stream(
+            text,
+            LANGUAGE,
+            self.gpt_cond_latent,
+            self.speaker_embedding)
+        for i, chunk in enumerate(stream_generator):
+            if self.stop_current_inference:
+                break
+
+            print("TTS: <T>", time.time()-start)
+            print("TTS: --> Audio Chunk [",i,"] added to buffer")
+            if i == 0:
+                print("\n\n\n###############")
+                print("  Total Latency for first response: ")
+                print("  [ ", time.time()-self.start_conversation," seconds ]")
+                print("###############\n\n\n")
+            start = time.time()
+            chunk = chunk.numpy().tobytes()
+            self.audio_buffer.put(chunk)
+
     def play_audio_thread(self):
         # Thread for playing audio
         stream = self.audio.open(format=self.FORMAT, channels=self.CHANNELS,
@@ -77,26 +108,14 @@ class Voice2Voice():
         # Thread for processing text-to-speech
         while True:
             text = self.text_buffer.get()
-            if text is None:
-                continue
-            print("\n TTS: synthesizing... ")
-            start = time.time()
-            stream_generator = self.tts_model.inference_stream(
-                text,
-                LANGUAGE,
-                self.gpt_cond_latent,
-                self.speaker_embedding)
-            for i, chunk in enumerate(stream_generator):
-                print("TTS: <T>", time.time()-start)
-                print("TTS: --> Audio Chunk [",i,"] added to buffer")
-                if i == 0:
-                    print("\n\n\n###############")
-                    print("  Total Latency for first response: ")
-                    print("  [ ", time.time()-self.start_conversation," seconds ]")
-                    print("###############\n\n\n")
-                start = time.time()
-                chunk = chunk.numpy().tobytes()
-                self.audio_buffer.put(chunk)
+            if not text is None:
+                self.synthesize_speech(text)
+            
+    def llm_thread(self):
+        while True:
+            prompt = self.prompt_buffer.get()
+            if not prompt is None:
+                self.prompt_llm(prompt)
 
     def prompt_llm(self,prompt):
         # Process text with the large language model
@@ -109,6 +128,9 @@ class Voice2Voice():
         )
         output_buffer = ""
         for output in stream:
+            if self.stop_current_inference:
+                break
+
             if "choices" in output and output["choices"]:
                 text_output = output["choices"][0]["text"]
                 output_buffer += text_output
@@ -126,17 +148,27 @@ class Voice2Voice():
 
     def handle_voice_input(self):
         # Handle voice input from the user
+        self.interrupt_inference()
         self.start_conversation = time.time()
         text, stop = self.transcribe_audio(self.whisper_model)
         if self.wake_word != None and self.wake_word.lower() not in text.lower():
             return False
         if text != None and not stop:
-            self.prompt_llm(text)
+            self.stop_current_inference = False
+            self.prompt_buffer.put(text)
         return stop
+
+    def interrupt_inference(self):
+        self.stop_current_inference = True
+        self.prompt_buffer.queue.clear()
+        self.text_buffer.queue.clear()
+        self.audio_buffer.queue.clear()
 
     def run(self):
         # Main run loop for the voice assistant
         self.start_threads()
+
+        self.text_buffer.put("How can I help you?")
 
         with sr.Microphone() as source:
             self.recognizer.adjust_for_ambient_noise(source, duration=0.4)
