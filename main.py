@@ -18,6 +18,9 @@ TTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
 DEVICE = "cuda"
 STOP_PHRASE = "Stop recording"
 
+PRINT_TIME_MEASUREMENTS = False
+
+
 class Voice2Voice():
     # Audio format settings for PyAudio
     FORMAT = pyaudio.paFloat32
@@ -42,6 +45,7 @@ class Voice2Voice():
         self.start_conversation = time.time()
 
         self.stop_current_inference = False
+        self.context = "System: You are a helpfull assistent that talks to a user. Keep your answers short and simple."
 
     def start_threads(self):
         # Start threads for text processing and audio playback
@@ -69,12 +73,13 @@ class Voice2Voice():
                 stop = True
         else:
             text = None
-        print("ASR: <T> ", time.time()-start)
+        if PRINT_TIME_MEASUREMENTS:
+            print("ASR: <T> ", time.time()-start)
         print("ASR --> ", text)
         return text, stop
 
     def synthesize_speech(self, text):
-        print("\n TTS: synthesizing... ")
+        print("\nTTS: synthesizing... ")
         start = time.time()
         stream_generator = self.tts_model.inference_stream(
             text,
@@ -84,14 +89,14 @@ class Voice2Voice():
         for i, chunk in enumerate(stream_generator):
             if self.stop_current_inference:
                 break
-
-            print("TTS: <T>", time.time()-start)
-            print("TTS: --> Audio Chunk [",i,"] added to buffer")
-            if i == 0:
-                print("\n\n\n###############")
-                print("  Total Latency for first response: ")
-                print("  [ ", time.time()-self.start_conversation," seconds ]")
-                print("###############\n\n\n")
+            if PRINT_TIME_MEASUREMENTS:
+                print("TTS: <T>", time.time()-start)
+                print("TTS: --> Audio Chunk [",i,"] added to buffer")
+                if i == 0:
+                    print("\n\n\n###############")
+                    print("  Total Latency for first response: ")
+                    print("  [ ", time.time()-self.start_conversation," seconds ]")
+                    print("###############\n\n\n")
             start = time.time()
             chunk = chunk.numpy().tobytes()
             self.audio_buffer.put(chunk)
@@ -119,10 +124,19 @@ class Voice2Voice():
 
     def prompt_llm(self,prompt):
         # Process text with the large language model
+
+        self.context += "\nUser: "+prompt+"\nAssistant:"
+
+        print("\n\n----------------------------")
+        print("CONTEXT: ")
+        print(self.context)
+        print("----------------------------\n\n")
+
+
         print("\nLLM: inference ...")
         start = time.time()
         stream = self.llm(
-            prompt,
+            self.context,
             max_tokens=10000,  
             stream=True,
         )
@@ -140,10 +154,12 @@ class Voice2Voice():
                         output_buffer = ""
                         continue
                     output_buffer = output_buffer.replace('assistant', '').strip() 
-                    print("LLM: <T> ", time.time()-start)
+                    if PRINT_TIME_MEASUREMENTS:
+                        print("LLM: <T> ", time.time()-start)
                     print("LLM: -->  ", output_buffer)
                     start = time.time()
                     self.text_buffer.put(output_buffer)
+                    self.context += " "+output_buffer
                     output_buffer = ""
 
     def handle_voice_input(self):
@@ -159,10 +175,12 @@ class Voice2Voice():
         return stop
 
     def interrupt_inference(self):
-        self.stop_current_inference = True
-        self.prompt_buffer.queue.clear()
-        self.text_buffer.queue.clear()
-        self.audio_buffer.queue.clear()
+        if self.prompt_buffer.qsize()>0 or self.text_buffer.qsize()>0 or self.audio_buffer.qsize()>0:
+            print("\n## INTERRUPT CURRENT INFERENCE ##")
+            self.stop_current_inference = True
+            self.prompt_buffer.queue.clear()
+            self.text_buffer.queue.clear()
+            self.audio_buffer.queue.clear()
 
     def run(self):
         # Main run loop for the voice assistant
