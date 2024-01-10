@@ -12,7 +12,7 @@ import argparse                        # Importing the argparse library for comm
 # Constants for configuration
 WHISPER_MODEL = "base"
 LANGUAGE = "en"
-LLM_PATH = "stablelm-zephyr-3b.Q4_K_M.gguf"
+LLM_PATH = "dolphin-2_6-phi-2.Q4_K_M.gguf" #"stablelm-zephyr-3b.Q4_K_M.gguf"
 SPEAKER_WAV = "voice_male.wav"
 TTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
 DEVICE = "cuda"
@@ -44,7 +44,8 @@ class Voice2Voice():
         self.wake_word = wake_word  # Optional wake word for activation
         self.start_conversation = time.time()
 
-        self.stop_current_inference = False
+        self.stop_llm_inference = False
+        self.stop_tts_inference = False
         self.context = "System: You are a helpfull assistent that talks to a user. Keep your answers short and simple."
 
     def start_threads(self):
@@ -87,7 +88,8 @@ class Voice2Voice():
             self.gpt_cond_latent,
             self.speaker_embedding)
         for i, chunk in enumerate(stream_generator):
-            if self.stop_current_inference:
+            if self.stop_tts_inference:
+                self.stop_tts_inference = False
                 break
             if PRINT_TIME_MEASUREMENTS:
                 print("TTS: <T>", time.time()-start)
@@ -142,7 +144,8 @@ class Voice2Voice():
         )
         output_buffer = ""
         for output in stream:
-            if self.stop_current_inference:
+            if self.stop_llm_inference:
+                self.stop_llm_inference = False
                 break
 
             if "choices" in output and output["choices"]:
@@ -164,20 +167,20 @@ class Voice2Voice():
 
     def handle_voice_input(self):
         # Handle voice input from the user
-        self.interrupt_inference()
         self.start_conversation = time.time()
         text, stop = self.transcribe_audio(self.whisper_model)
         if self.wake_word != None and self.wake_word.lower() not in text.lower():
             return False
         if text != None and not stop:
-            self.stop_current_inference = False
+            self.interrupt_inference()
             self.prompt_buffer.put(text)
         return stop
 
     def interrupt_inference(self):
         if self.prompt_buffer.qsize()>0 or self.text_buffer.qsize()>0 or self.audio_buffer.qsize()>0:
             print("\n## INTERRUPT CURRENT INFERENCE ##")
-            self.stop_current_inference = True
+            self.stop_llm_inference = True
+            self.stop_tts_inference = True
             self.prompt_buffer.queue.clear()
             self.text_buffer.queue.clear()
             self.audio_buffer.queue.clear()
