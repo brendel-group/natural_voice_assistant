@@ -8,6 +8,8 @@ from preprocessor import Preprocessor
 from streaming_buffer import StreamBuffer
 from stt_llm_tts_model import STT_LLM_TTS
 
+import numpy as np
+import librosa
 
 def record(audio_buffer, start_recording):
     """Record an audio stream from the microphone in a separate process  
@@ -15,7 +17,7 @@ def record(audio_buffer, start_recording):
             audio_buffer: multiprocessing queue to store the recorded audio data
             start_recording: multiprocessing value to start and stop the recording
     """
-    RATE = 16000
+    RATE = 44100
     CHUNK = 2048
 
     # Open audio input stream
@@ -97,8 +99,13 @@ def main_loop(streaming_buffer, model, audio_input_buffer, audio_output_buffer, 
                 data = audio_input_buffer.get(block=False)
                 
                 # preprocess audio data
-                t = torch.frombuffer(data, dtype=torch.float32)
+                t = np.frombuffer(data, dtype=np.float32)
+                t = librosa.core.resample(t, orig_sr=44100, target_sr=16000)
+                t = t.transpose()
+                #t = torch.frombuffer(data, dtype=torch.float32)
+                t = torch.from_numpy(t)
                 t = torch.unsqueeze(t,0)
+
                 length = torch.tensor([t.shape[1]], dtype=torch.float32)
                 processed_signal, _ = preprocessor(t, length)
 
